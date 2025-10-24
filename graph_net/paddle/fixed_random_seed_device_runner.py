@@ -11,6 +11,7 @@ from pathlib import Path
 
 from graph_net.paddle import utils
 from graph_net import test_compiler_util
+from graph_net import path_utils
 
 
 def set_seed(random_seed):
@@ -125,6 +126,52 @@ def measure_performance(model_call, synchronizer_func, warmup, trials):
     return test_compiler_util.get_timing_stats(e2e_times)
 
 
+def test_single_model(args, model_path):
+    set_seed(123)
+    
+    print(f"[Config] device: {args.device}")
+    print(f"[Config] compiler: {args.compiler}")
+    print(f"[Config] hardware: {get_hardware_name(args.device)}")
+    print(f"[Config] framework_version: {paddle.__version__}")
+    print(f"[Config] warmup: {args.warmup}")
+    print(f"[Config] trials: {args.trials}")
+
+    success = False
+    try:
+        synchronizer_func = paddle.device.synchronize
+        
+        input_dict = get_input_dict(model_path)
+        model = load_model(model_path)
+        model.eval()
+
+        print(f"Run model with compiler: {args.compiler}")
+        if args.compiler == "nope":
+            compiled_model = model
+        else:
+            compiled_model = get_compiled_model(model, args.compiler, model_path)
+        
+        time_stats = measure_performance(
+            lambda: compiled_model(**input_dict), 
+            synchronizer_func, 
+            args.warmup, 
+            args.trials
+        )
+        success = True
+        
+        print(f"[Result] model_path: {model_path}")
+        print(f"[Result] compiler: {args.compiler}")
+        print(f"[Result] device: {args.device}")
+        print(f"[Result] e2e_mean: {time_stats['mean']:.5f}")
+        print(f"[Result] e2e_std: {time_stats['std']:.5f}")
+        
+    except Exception as e:
+        print(f"Run model failed: {str(e)}")
+        print(traceback.format_exc())
+        return False
+
+    return success
+
+
 def main():
     parser = argparse.ArgumentParser(description="Test device performance with fixed random seeds")
     parser.add_argument(
@@ -161,52 +208,43 @@ def main():
         default=10,
         help="Number of timing trials"
     )
+    parser.add_argument(
+        "--allow-list",
+        type=str,
+        required=False,
+        default=None,
+        help="Path to allow list file"
+    )
     
     args = parser.parse_args()
     
-    set_seed(123)
+    test_samples = []
+    if args.allow_list is not None:
+        assert os.path.isfile(args.allow_list)
+        graphnet_root = path_utils.get_graphnet_root()
+        print(f"graphnet_root: {graphnet_root}")
+        test_samples = []
+        with open(args.allow_list, "r") as f:
+            for line in f.readlines():
+                test_samples.append(os.path.join(graphnet_root, line.strip()))
+
+    sample_idx = 0
+    failed_samples = []
     
-    print(f"[Config] device: {args.device}")
-    print(f"[Config] compiler: {args.compiler}")
-    print(f"[Config] hardware: {get_hardware_name(args.device)}")
-    print(f"[Config] framework_version: {paddle.__version__}")
-    print(f"[Config] warmup: {args.warmup}")
-    print(f"[Config] trials: {args.trials}")
+    for model_path in path_utils.get_recursively_model_path(args.model_path):
+        if not test_samples or os.path.abspath(model_path) in test_samples:
+            print(f"[{sample_idx}] fixed_random_seed_device_runner, model_path: {model_path}")
+            
+            success = test_single_model(args, model_path)
+            if not success:
+                failed_samples.append(model_path)
+            sample_idx += 1
 
-    success = False
-    try:
-        synchronizer_func = paddle.device.synchronize
-        
-        input_dict = get_input_dict(args.model_path)
-        model = load_model(args.model_path)
-        model.eval()
+    print(f"Totally {sample_idx} verified samples, failed {len(failed_samples)} samples.")
+    for model_path in failed_samples:
+        print(f"- {model_path}")
 
-        print(f"Run model with compiler: {args.compiler}")
-        if args.compiler == "nope":
-            compiled_model = model
-        else:
-            compiled_model = get_compiled_model(model, args.compiler, args.model_path)
-        
-        time_stats = measure_performance(
-            lambda: compiled_model(**input_dict), 
-            synchronizer_func, 
-            args.warmup, 
-            args.trials
-        )
-        success = True
-        
-        print(f"[Result] model_path: {args.model_path}")
-        print(f"[Result] compiler: {args.compiler}")
-        print(f"[Result] device: {args.device}")
-        print(f"[Result] e2e_mean: {time_stats['mean']:.5f}")
-        print(f"[Result] e2e_std: {time_stats['std']:.5f}")
-        
-    except Exception as e:
-        print(f"Run model failed: {str(e)}")
-        print(traceback.format_exc())
-        return 1
-
-    return 0 if success else 1
+    return 0 if len(failed_samples) == 0 else 1
 
 
 if __name__ == "__main__":
