@@ -2,7 +2,7 @@
 
 GRAPH_NET_ROOT=$(python3 -c "import graph_net; import os; print(os.path.dirname(os.path.dirname(graph_net.__file__)))")
 
-model_path_list=/ssd2/zhengenrong/GraphNet/graph_net/test/workspace_cumsum_num_kernels/test_model_list.txt
+model_path_list=$GRAPH_NET_ROOT/graph_net/test/workspace_cumsum_num_kernels/test_model_list.txt
 WORKSPACE_ROOT=/tmp/fusible_subgraphs
 CUMSUM_NUM_KERNELS_WORKSPACE=$WORKSPACE_ROOT/workspace_cumsum_num_kernels
 FUSIBLE_SUBGRAPH_RANGES_WORKSPACE=$WORKSPACE_ROOT/workspace_fusible_subgraph_ranges
@@ -17,7 +17,7 @@ python3 -m graph_net.model_path_handler \
     "handler_class_name": "CumSumNumKernelsGenerator",
     "handler_config": {
         "output_json_file_name": "cumsum_num_kernels.json",
-        "model_path_prefix": "/ssd2/zhengenrong/GraphNet/graph_net/test/workspace_cumsum_num_kernels",
+        "model_path_prefix": "$GRAPH_NET_ROOT/graph_net/test/workspace_cumsum_num_kernels",
         "output_dir": "$CUMSUM_NUM_KERNELS_WORKSPACE",
         "resume": $resume
     }
