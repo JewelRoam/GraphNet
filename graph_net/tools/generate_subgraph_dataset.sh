@@ -32,19 +32,22 @@ DIM_GENERALIZED_FUSIBLE_SUBGRAPH_DIR=$DECOMPOSE_WORKSPACE/11_dimension_generaliz
 RENAMED_DIM_GENERALIZED_FUSIBLE_SUBGRAPH_DIR=$DECOMPOSE_WORKSPACE/12_renamed_dimension_generalized_fusible_subgraphs
 DEDUP_DIM_GENERALIZED_FUSIBLE_SUBGRAPH_DIR=$DECOMPOSE_WORKSPACE/13_deduplicated_dimension_generalized_fusible_subgraphs
 DTYPE_GENERALIZED_FUSIBLE_SUBGRAPH_DIR=$DECOMPOSE_WORKSPACE/14_dtype_generalized_fusible_subgraphs
-# FUSIBLE_SUBGRAPH_UNITTEST_DIR=$DECOMPOSE_WORKSPACE/15_fusible_subgraphs_unittests
+BACKWARD_GRAPH_OUTPUT_DIR=$DECOMPOSE_WORKSPACE/15_backward_graph_extracted
+FUSIBLE_SUBGRAPH_UNITTEST_DIR=$DECOMPOSE_WORKSPACE/16_fusible_subgraphs_unittests
 
 # typical_subgraphs
 DIM_GENERALIZED_TYPICAL_SUBGRAPH_DIR=$DECOMPOSE_WORKSPACE/2-08_dimension_generalized_typical_subgraphs
 RENAMED_DIM_GENERALIZED_TYPICAL_SUBGRAPH_DIR=$DECOMPOSE_WORKSPACE/2-09_renamed_dimension_generalized_typical_subgraphs
 DEDUP_DIM_GENERALIZED_TYPICAL_SUBGRAPH_DIR=$DECOMPOSE_WORKSPACE/2-10_deduplicated_dimension_generalized_typical_subgraphs
 DTYPE_GENERALIZED_TYPICAL_SUBGRAPH_DIR=$DECOMPOSE_WORKSPACE/2-11_dtype_generalized_typical_subgraphs
-# TYPICAL_SUBGRAPH_UNITTEST_DIR=$DECOMPOSE_WORKSPACE/2-12_typical_kernelbench_unittests
+BACKWARD_GRAPH_TYPICAL_OUTPUT_DIR=$DECOMPOSE_WORKSPACE/2-13_backward_graph_extracted
+TYPICAL_SUBGRAPH_UNITTEST_DIR=$DECOMPOSE_WORKSPACE/2-14_typical_kernelbench_unittests
 
 mkdir -p $DECOMPOSE_WORKSPACE
 mkdir -p $OUTPUT_DIR
 
-model_list="$GRAPH_NET_ROOT/graph_net/config/small100_torch_samples_list.txt"
+model_list="$GRAPH_NET_ROOT/graph_net/config/torch_samples_list.txt"
+DB_PATH=$DECOMPOSE_WORKSPACE/small100_torch_samples.db
 
 device_rewrited_sample_list=${DECOMPOSE_WORKSPACE}/device_rewrited_sample_list.txt
 range_decomposed_subgraph_list=${DECOMPOSE_WORKSPACE}/range_decomposed_subgraph_sample_list.txt
@@ -405,8 +408,28 @@ EOF
 )
 }
 
+function backward_graph_extractor() {
+    echo ">>> [13] Extract backward graphs for samples under ${DTYPE_GENERALIZED_FUSIBLE_SUBGRAPH_DIR}."
+    echo ">>>"
+    python3 -m graph_net.model_path_handler \
+        --model-path-list ${dtype_generalized_subgraphs_list} \
+        --handler-config=$(base64 -w 0 <<EOF
+{
+    "handler_path": "$GRAPH_NET_ROOT/graph_net/torch/sample_pass/backward_graph_extractor.py",
+    "handler_class_name": "BackwardGraphExtractorPass",
+    "handler_config": {
+        "model_path_prefix": "$DTYPE_GENERALIZED_FUSIBLE_SUBGRAPH_DIR",
+        "output_dir": "$BACKWARD_GRAPH_OUTPUT_DIR",
+        "device": "cuda",
+        "resume": ${RESUME}
+    }
+}
+EOF
+)
+}
+
 function generate_unittests() {
-    echo ">>> [13] Generate unittests for subgraph samples under ${DTYPE_GENERALIZED_FUSIBLE_SUBGRAPH_DIR}. "
+    echo ">>> [14] Generate unittests for subgraph samples under ${BACKWARD_GRAPH_OUTPUT_DIR}. "
     echo ">>>"
     python3 -m graph_net.model_path_handler \
         --model-path-list ${dtype_generalized_subgraphs_list} \
@@ -416,7 +439,7 @@ function generate_unittests() {
     "handler_class_name": "AgentUnittestGeneratorPass",
     "handler_config": {
         "framework": "torch",
-        "model_path_prefix": "${DTYPE_GENERALIZED_FUSIBLE_SUBGRAPH_DIR}",
+        "model_path_prefix": "${BACKWARD_GRAPH_OUTPUT_DIR}",
         "output_dir": "${FUSIBLE_SUBGRAPH_UNITTEST_DIR}",
         "device": "cuda",
         "generate_main": false,
@@ -520,8 +543,28 @@ EOF
 )
 }
 
+function backward_graph_extractor_typical() {
+    echo ">>> [2-13] Extract backward graphs for typical subgraph samples under ${DTYPE_GENERALIZED_TYPICAL_SUBGRAPH_DIR}."
+    echo ">>>"
+    python3 -m graph_net.model_path_handler \
+        --model-path-list ${dtype_generalized_typical_subgraph_list} \
+        --handler-config=$(base64 -w 0 <<EOF
+{
+    "handler_path": "$GRAPH_NET_ROOT/graph_net/torch/sample_pass/backward_graph_extractor.py",
+    "handler_class_name": "BackwardGraphExtractorPass",
+    "handler_config": {
+        "model_path_prefix": "$DTYPE_GENERALIZED_TYPICAL_SUBGRAPH_DIR",
+        "output_dir": "$BACKWARD_GRAPH_TYPICAL_OUTPUT_DIR",
+        "device": "cuda",
+        "resume": ${RESUME}
+    }
+}
+EOF
+)
+}
+
 function generate_unittest_for_typical_subgraphs() {
-    echo ">>> [2-13] Generate unittests for subgraph samples under ${DTYPE_GENERALIZED_TYPICAL_SUBGRAPH_DIR}. "
+    echo ">>> [2-14] Generate unittests for subgraph samples under ${BACKWARD_GRAPH_TYPICAL_OUTPUT_DIR}. "
     echo ">>>"
     python3 -m graph_net.model_path_handler \
         --model-path-list ${dtype_generalized_typical_subgraph_list} \
@@ -531,7 +574,7 @@ function generate_unittest_for_typical_subgraphs() {
     "handler_class_name": "AgentUnittestGeneratorPass",
     "handler_config": {
         "framework": "torch",
-        "model_path_prefix": "${DTYPE_GENERALIZED_TYPICAL_SUBGRAPH_DIR}",
+        "model_path_prefix": "${BACKWARD_GRAPH_TYPICAL_OUTPUT_DIR}",
         "output_dir": "${TYPICAL_SUBGRAPH_UNITTEST_DIR}",
         "device": "cuda",
         "generate_main": false,
@@ -586,6 +629,9 @@ function generate_fusible_subgraphs() {
     dtype_generalizer 2>&1 | tee ${DECOMPOSE_WORKSPACE}/log_dtype_generalizer_fusible_subgraphs_${suffix}.txt
     generate_generalized_subgraph_list ${DTYPE_GENERALIZED_FUSIBLE_SUBGRAPH_DIR} ${dtype_generalized_subgraphs_list}
 
+    # extract backward graphs (train_forward, train_backward, eval_forward)
+    backward_graph_extractor 2>&1 | tee ${DECOMPOSE_WORKSPACE}/log_backward_graph_extractor_${suffix}.txt
+
     # generate kernelbench format unittest
     # generate_unittests 2>&1 | tee ${DECOMPOSE_WORKSPACE}/log_unittests_${suffix}.txt
 }
@@ -605,6 +651,9 @@ function generate_typical_subgraphs() {
     # dtype generalization
     dtype_generalizer_for_typical_subgraphs 2>&1 | tee ${DECOMPOSE_WORKSPACE}/log_dtype_generalizer_typical_subgraphs_${suffix}.txt
     generate_generalized_subgraph_list ${DTYPE_GENERALIZED_TYPICAL_SUBGRAPH_DIR} ${dtype_generalized_typical_subgraph_list}
+
+    # extract backward graphs (train_forward, train_backward, eval_forward)
+    backward_graph_extractor_typical 2>&1 | tee ${DECOMPOSE_WORKSPACE}/log_backward_graph_extractor_typical_${suffix}.txt
 
     # generate kernelbench format unittest
     # generate_unittest_for_typical_subgraphs 2>&1 | tee ${DECOMPOSE_WORKSPACE}/log_unittests_typical_subgraphs_${suffix}.txt
@@ -643,6 +692,7 @@ function main() {
 
     sample_type="typical_graph"
     generate_typical_subgraphs
+    insert_graph_sample ${DEDUP_TYPICAL_SUBGRAPH_DIR} "github_torch_samples" "typical_graph" ${deduplicated_typical_subgraph_list}
     cp -rf $DTYPE_GENERALIZED_TYPICAL_SUBGRAPH_DIR $OUTPUT_DIR/$sample_type
     cp -rf $dtype_generalized_typical_subgraph_list $OUTPUT_DIR/$sample_type/sample_list.txt
 
@@ -729,6 +779,25 @@ function summary() {
     done
     echo ""
 
+    num_backward_graph_subgraphs=`find ${BACKWARD_GRAPH_OUTPUT_DIR} -name "model.py" | wc -l`
+    echo "- [Fusible - 6] backward graph extraction: successed=${num_backward_graph_subgraphs}"
+    for mode in eval_forward train_forward train_backward
+    do
+        num_backward_graph_subgraphs_mode=`find ${BACKWARD_GRAPH_OUTPUT_DIR}/${mode} -name "model.py" | wc -l`
+        echo "    ${mode}, successed=${num_backward_graph_subgraphs_mode}"
+    done
+    echo ""
+
+    num_successed_unittests=`find ${FUSIBLE_SUBGRAPH_UNITTEST_DIR} -name "*_test.py" | wc -l`
+    unittest_successed_percent=$((num_successed_unittests * 100 / num_backward_graph_subgraphs))
+    echo "- [Fusible - 7] generate unittest: successed=${num_successed_unittests}, percent=${unittest_successed_percent}%"
+    for dtype in float32 float16 bfloat16
+    do
+        num_successed_unittests=`find ${FUSIBLE_SUBGRAPH_UNITTEST_DIR}/${dtype} -name "*_test.py" | wc -l`
+        echo "    ${dtype}, successed=${num_successed_unittests}"
+    done
+    echo ""
+
     # typical subgraphs
     num_dim_generalized_typical_subgraphs=`find ${DIM_GENERALIZED_TYPICAL_SUBGRAPH_DIR} -name "model.py" | wc -l`
     echo "- [Typical - 1] subgraph dimension generalization: successed=${num_dim_generalized_typical_subgraphs}"
@@ -754,8 +823,17 @@ function summary() {
     done
     echo ""
 
+    num_backward_graph_typical_subgraphs=`find ${BACKWARD_GRAPH_TYPICAL_OUTPUT_DIR} -name "model.py" | wc -l`
+    echo "- [Typical - 4] backward graph extraction: successed=${num_backward_graph_typical_subgraphs}"
+    for mode in eval_forward train_forward train_backward
+    do
+        num_backward_graph_typical_mode=`find ${BACKWARD_GRAPH_TYPICAL_OUTPUT_DIR}/${mode} -name "model.py" | wc -l`
+        echo "    ${mode}, successed=${num_backward_graph_typical_mode}"
+    done
+    echo ""
+
     num_dtype_generalized_typical_subgraphs=`find ${DTYPE_GENERALIZED_TYPICAL_SUBGRAPH_DIR} -name "model.py" | wc -l`
-    echo "- [Typical - 4] dtype generalization: successed=${num_dtype_generalized_typical_subgraphs}"
+    echo "- [Typical - 5] dtype generalization: successed=${num_dtype_generalized_typical_subgraphs}"
     for dtype in float32 float16 bfloat16
     do
         num_dtype_generalized_typical_subgraphs_index=`find ${DTYPE_GENERALIZED_TYPICAL_SUBGRAPH_DIR}/${dtype} -name "model.py" | wc -l`
